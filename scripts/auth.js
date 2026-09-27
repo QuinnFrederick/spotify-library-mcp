@@ -1,10 +1,8 @@
 // One-time PKCE login: opens your browser, catches the callback, writes SPOTIFY_REFRESH_TOKEN into .env
 import { createServer } from "node:http";
 import { randomBytes, createHash } from "node:crypto";
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
-import { exec } from "node:child_process";
-import { loadEnv, ROOT } from "../src/env.js";
+import { execFile } from "node:child_process";
+import { loadEnv, setEnvValue } from "../src/env.js";
 
 loadEnv();
 const ACCOUNTS = process.env.SPOTIFY_ACCOUNTS_URL ?? "https://accounts.spotify.com";
@@ -58,7 +56,7 @@ const server = createServer(async (req, res) => {
     });
     if (!r.ok) throw new Error(`token exchange ${r.status}: ${await r.text()}`);
     const { refresh_token } = await r.json();
-    saveToken(refresh_token);
+    setEnvValue("SPOTIFY_REFRESH_TOKEN", refresh_token);
     res.end("<h2>Spotify connected. You can close this tab.</h2>");
     console.log("Refresh token saved to .env");
     setTimeout(() => process.exit(0), 200);
@@ -70,15 +68,7 @@ const server = createServer(async (req, res) => {
   }
 });
 
-function saveToken(tok) {
-  const file = join(ROOT, ".env");
-  let text = existsSync(file) ? readFileSync(file, "utf8") : "";
-  if (/^SPOTIFY_REFRESH_TOKEN=.*$/m.test(text)) text = text.replace(/^SPOTIFY_REFRESH_TOKEN=.*$/m, `SPOTIFY_REFRESH_TOKEN=${tok}`);
-  else text += `${text.endsWith("\n") || !text ? "" : "\n"}SPOTIFY_REFRESH_TOKEN=${tok}\n`;
-  writeFileSync(file, text);
-}
-
 server.listen(Number(port) || 80, "127.0.0.1", () => {
   console.log("Open this URL in your browser if it didn't open automatically:\n\n" + url.href + "\n");
-  if (!process.env.NO_BROWSER) exec(`open "${url.href}"`);
+  if (!process.env.NO_BROWSER) execFile("open", [url.href]);
 });

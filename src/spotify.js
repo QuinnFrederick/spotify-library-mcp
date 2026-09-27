@@ -1,4 +1,4 @@
-import { loadEnv } from "./env.js";
+import { loadEnv, setEnvValue } from "./env.js";
 import { budget } from "./budget.js";
 
 loadEnv();
@@ -46,12 +46,20 @@ export async function refreshAccessToken() {
     headers.Authorization = "Basic " + Buffer.from(`${clientId}:${process.env.SPOTIFY_CLIENT_SECRET}`).toString("base64");
   }
   const res = await fetch(`${ACCOUNTS}/api/token`, { method: "POST", headers, body });
-  if (!res.ok) throw new Error(`Token refresh failed (${res.status}): ${await res.text()}`);
+  if (!res.ok) {
+    // Only the OAuth error code: never echo a token-endpoint body wholesale.
+    const code = await res.json().then((j) => j?.error, () => undefined);
+    const hint = code === "invalid_grant" ? " Refresh token expired or revoked (they last ~6 months): run `npm run auth` again." : "";
+    throw new Error(`Token refresh failed (${res.status}${code ? " " + code : ""}).${hint}`);
+  }
   const json = await res.json();
   accessToken = json.access_token;
   expiresAt = Date.now() + (json.expires_in - 60) * 1000;
-  // Spotify may rotate the refresh token under PKCE; keep using the newest in-process.
-  if (json.refresh_token) process.env.SPOTIFY_REFRESH_TOKEN = json.refresh_token;
+  // Spotify rotates refresh tokens under PKCE. Persist the new one, or the next process start uses a dead token.
+  if (json.refresh_token && json.refresh_token !== refreshToken) {
+    process.env.SPOTIFY_REFRESH_TOKEN = json.refresh_token;
+    setEnvValue("SPOTIFY_REFRESH_TOKEN", json.refresh_token);
+  }
   return accessToken;
 }
 
@@ -62,6 +70,8 @@ async function token() {
 
 export async function api(method, path, { query, body, retries = 3 } = {}) {
   const url = new URL(path.startsWith("http") ? path : API + path);
+  // Absolute URLs come from `next` links; never send the bearer token anywhere but the API host.
+  if (url.origin !== new URL(API).origin) throw new Error(`Refusing non-Spotify URL ${url.origin}`);
   const rel = url.pathname.replace(/^\/v1/, "");
   const readingLikes = method === "GET" && rel === "/me/tracks"; // GET /me/tracks still works; only PUT/DELETE moved
   if (!readingLikes) for (const [re, msg] of GONE) if (re.test(rel)) throw new Error(`Spotify API limit: ${msg}`);
@@ -88,7 +98,7 @@ export async function api(method, path, { query, body, retries = 3 } = {}) {
     const secs = Number(res.headers.get("retry-after")) || 1;
     // Spotify hands out multi-hour bans on /search (e.g. 75469s after ~1000 searches/day). Never sleep through those.
     if (secs > 60 && url.pathname.endsWith("/search")) budget.ban(secs);
-    if (secs > 60 || retries === 0) throw new Error(`Spotify rate limit on ${url.pathname}: retry after ${secs}s (~${(secs / 3600).toFixed(1)}h). Per-app limit — a different Spotify app (client id) has its own quota.`);
+    if (secs > 60 || retries === 0) throw new Error(`Spotify rate limit on ${url.pathname}: retry after ${secs}s (~${(secs / 3600).toFixed(1)}h). Per-app limit (and Spotify now allows one client id per developer).`);
     const wait = secs * 1000;
     await new Promise((r) => setTimeout(r, wait));
     return api(method, path, { query, body, retries: retries - 1 });
@@ -132,11 +142,12 @@ const slimTrack = (t) =>
     artists: (t.artists ?? []).map((a) => a.name).join(", "),
     album: t.album?.name,
     duration_ms: t.duration_ms,
-    popularity: t.popularity,
     release: t.album?.release_date,
   };
 
 export const searchBudget = () => budget.status();
+// Feb 2026: /search limit max is 10 (was 50).
+export const SEARCH_LIMIT_MAX = 10;
 
 export const spotify = {
   me: () => api("GET", "/me"),
@@ -219,6 +230,7 @@ export const spotify = {
   },
 
   async search(q, type = "track", limit = 10) {
+    limit = Math.min(Math.max(1, limit ?? 10), SEARCH_LIMIT_MAX);
     const key = `${type}|${limit}|${q}`;
     const hit = budget.cacheGet(key);
     if (hit) return hit;
@@ -246,7 +258,7 @@ export const spotify = {
   topTracks: (range = "medium_term", limit = 50) =>
     api("GET", "/me/top/tracks", { query: { time_range: range, limit } }).then((r) => r.items.map(slimTrack)),
   topArtists: (range = "medium_term", limit = 50) =>
-    api("GET", "/me/top/artists", { query: { time_range: range, limit } }).then((r) => r.items.map((a) => ({ id: a.id, name: a.name, genres: a.genres }))),
+    api("GET", "/me/top/artists", { query: { time_range: range, limit } }).then((r) => r.items.map((a) => ({ id: a.id, name: a.name }))),
   recentlyPlayed: (limit = 50) =>
     api("GET", "/me/player/recently-played", { query: { limit } }).then((r) => r.items.map((i) => ({ played_at: i.played_at, ...slimTrack(i.track) }))),
 };

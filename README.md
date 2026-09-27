@@ -1,5 +1,7 @@
 # spotify-library-mcp
 
+Forked from [oliver-virt/spotify-library-mcp](https://github.com/oliver-virt/spotify-library-mcp) (MIT) and pruned to just the MCP server + CLI. See DECISION.md.
+
 Local MCP server + CLI for managing **your own** Spotify library. Single user, runs on your machine, PKCE auth (no client secret needed).
 
 ## Setup (one time)
@@ -8,7 +10,7 @@ Local MCP server + CLI for managing **your own** Spotify library. Single user, r
    - Redirect URI: `http://127.0.0.1:8888/callback`
    - API: Web API
 2. Copy the **Client ID** into `.env` (`SPOTIFY_CLIENT_ID=...`)
-3. `npm install && npm run auth` → browser opens → approve → refresh token is written to `.env`
+3. `npm install && npm run auth` → browser opens → approve → refresh token is written to `.env` (mode 0600; rotated tokens are written back automatically)
 4. Verify: `node bin/spot.js playlists`
 
 ## Use from Claude Code
@@ -51,32 +53,13 @@ node bin/spot.js rediscover 4 50
 - `snapshot_library` · `list_snapshots` · `changes_since` — backup + "what changed since last week" (renames, adds, removes, likes)
 - `rediscover` — liked years ago, absent from top tracks and recent plays; spread across artists
 
-On my library these found: 233 liked songs in no playlist, 210 near-duplicates inside playlists, 1,113 forgotten likes from 2018–2021.
-
-## Library scripts (how I reorganised 40 playlists → 9)
-
-```
-node scripts/pull.js library.json      # snapshot playlists + likes + tops
-node scripts/build.js library.json     # file every track into genre collections (additive)
-node scripts/moods.js                  # collapse genre collections into mood playlists
-node scripts/curate.js library.json    # like picks, build Programming + שישי
-node scripts/nostalgia.js library.json # 3-generation nostalgia
-node scripts/explore.js library.json   # 🧭 Explore: ~400 new artists, many languages (search-heavy, resumable)
-node scripts/genz.js                   # 🚗 Gen Z
-node scripts/trending.js library.json  # 📈 Trending from live popularity
-```
-
-The artist lists in `scripts/classify.js` and friends are *my* taste — fork and edit. Every script is additive; deletions are separate explicit `spot delete` calls.
-
 ## Tests
 
 `npm test` runs the whole flow against an in-memory mock Spotify (`test/mock-spotify.js`). No real credentials touched.
 
-## claude.ai connector (remote)
+## Remote (HTTP) entry
 
-`npm run tunnel` starts `src/http.js` (Streamable HTTP at `/<MCP_SECRET>/mcp`) plus a Cloudflare quick tunnel and prints the URL to paste into claude.ai → Settings → Connectors → Add custom connector (no OAuth; the secret path is the gate).
-
-Quick tunnels get a new hostname each start. For a stable URL either run a named Cloudflare tunnel on your own domain, or deploy `src/http.js` behind your existing reverse proxy (e.g. the Nightscout box) with `MCP_SECRET`, `SPOTIFY_CLIENT_ID`, `SPOTIFY_REFRESH_TOKEN` in the environment.
+`npm run start:http` serves Streamable HTTP at `127.0.0.1:$PORT/<MCP_SECRET>/mcp`. It is meant to sit behind an OAuth gateway on the same machine; the secret path is defence in depth, not the only gate. Don't expose it directly to the internet.
 
 ## Spotify API limits (2026, apps created after Nov 2024) — baked in
 
@@ -84,10 +67,11 @@ Quick tunnels get a new hostname each start. For a stable URL either run a named
 |---|---|---|
 | `/audio-features`, `/recommendations`, `related-artists` | removed | client throws a clear error before any request |
 | batch `GET /tracks?ids=`, `/artists?ids=` | 403 | same; use single-item endpoints |
-| artist `genres` field | gone | no genre data available, use your own knowledge |
+| artist `genres`, `popularity` fields | gone | not returned |
 | `/playlists/{id}/tracks` | renamed `/items`, entries under `item` | client uses new paths |
 | `POST /users/{id}/playlists` | deprecated | `POST /me/playlists` |
 | `PUT/DELETE /me/tracks` | deprecated | `/me/library?uris=` (max 20 per call, chunked) |
+| `/search` `limit` | max 10 (was 50) | clamped in client and tool schema |
 | name-only search | returns karaoke/covers | `find_track` tool verifies the artist |
 | `/search` quota | **~1000/day per app → 429 with `retry-after ≈ 21h`** | persistent daily budget (default 800, `SPOTIFY_SEARCH_DAILY_CAP`), result cache, ban memory — see below |
 | ~500 rapid calls | silent TLS-level drop for ~10 min (no 429) | 150 ms pacing + retry with backoff |
@@ -104,6 +88,4 @@ What the server does about it (`src/budget.js`, state in `.search-budget.json`):
 - remembers a ban from a long `retry-after` and fails fast until it expires — no 21-hour sleeps
 - `get_search_budget` tool / `searchBudget()` report remaining, cached, banned-until
 
-Bulk scripts (`scripts/explore.js`, `genz.js`, `trending.js`) print the budget first, stop cleanly at the cap, and resume on rerun (they skip what's already in the playlist). Plan ≈ 250 searches per script per day, or use a second Spotify app for bulk jobs.
-
-Tomorrow's plan: ban lifts 2026-08-24 ~14:00 IDT → run `explore` (≈400, two days) or point a fresh client id at it.
+Spotify now allows one client id per developer, so a second app is not an escape hatch.

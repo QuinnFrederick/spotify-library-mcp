@@ -22,6 +22,17 @@ test("removed/renamed endpoints fail fast with a helpful message, before hitting
   await assert.doesNotReject(api("GET", "/me/tracks", { query: { limit: 1 } }), "reading likes still works");
 });
 
+test("never sends the bearer token to a non-Spotify origin (e.g. a poisoned `next` link)", async () => {
+  const before = mock.state.authedRequests;
+  await assert.rejects(api("GET", "https://evil.example/v1/me/tracks?offset=50"), /Refusing non-Spotify URL/);
+  assert.equal(mock.state.authedRequests, before);
+});
+
+test("search limit is clamped to the 2026 max of 10", async () => {
+  await spotify.search("clamp-me", "track", 50);
+  assert.equal(mock.state.searchLimits.at(-1), 10);
+});
+
 test("find_track rejects karaoke/cover mismatches; save/remove likes use /me/library in ≤20 chunks", async () => {
   mock.state.searchHits = [
     { id: "k1", uri: "spotify:track:k1", name: "Starburster", artists: [{ name: "Hit The Button Karaoke" }], album: { name: "Karaoke Hits" } },

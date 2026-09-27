@@ -13,6 +13,8 @@ export function start(port = 0) {
     searchHits: null,
     searchStatus: null,
     libraryCalls: [],
+    rotateRefresh: false,
+    searchLimits: [],
   };
   const mkTrack = (n) => ({ id: `t${n}`, uri: `spotify:track:t${n}`, name: `Track ${n}`, duration_ms: 1000 * n, artists: [{ name: `Artist ${n}` }], album: { name: `Album ${n}`, release_date: `${1970 + (n * 7) % 56}-01-01` } });
   const addPl = (id, name, ids) => state.playlists.set(id, { id, name, description: "", public: false, collaborative: false, owner: state.me, snapshot_id: "s1", external_urls: { spotify: `https://open.spotify.com/playlist/${id}` }, items: ids.map((n) => ({ added_at: "2024-01-01T00:00:00Z", item: mkTrack(n) })) });
@@ -48,7 +50,9 @@ export function start(port = 0) {
       if (body.grant_type === "refresh_token") {
         if (body.refresh_token !== state.refreshToken) return send(res, 400, { error: "invalid_grant" });
         const at = "at-" + Math.random().toString(36).slice(2); state.accessTokens.add(at);
-        return send(res, 200, { access_token: at, expires_in: 3600 });
+        if (!state.rotateRefresh) return send(res, 200, { access_token: at, expires_in: 3600 });
+        state.refreshToken = "rt-rotated-" + Math.random().toString(36).slice(2);
+        return send(res, 200, { access_token: at, refresh_token: state.refreshToken, expires_in: 3600 });
       }
       return send(res, 400, { error: "unsupported_grant_type" });
     }
@@ -67,6 +71,7 @@ export function start(port = 0) {
     if (p === "/v1/me/top/artists") return send(res, 200, { items: [{ id: "a1", name: "Artist 1", genres: ["pop"] }] });
     if (p === "/v1/me/player/recently-played") return send(res, 200, { items: [{ played_at: "2024-01-02T00:00:00Z", track: mkTrack(2) }] });
     if (p === "/v1/search" && state.searchStatus) { res.writeHead(state.searchStatus[0], { "retry-after": String(state.searchStatus[1]) }); return res.end(); }
+    if (p === "/v1/search") state.searchLimits.push(limit);
     if (p === "/v1/search") return send(res, 200, { tracks: { items: state.searchHits ?? [mkTrack(9)] } });
     if (p === "/v1/me/library") {
       const uris = (url.searchParams.get("uris") ?? "").split(",").filter(Boolean);

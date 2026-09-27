@@ -16,8 +16,9 @@ const HOST = process.env.HOST ?? "127.0.0.1";
 const expected = Buffer.from(`/${secret}/mcp`);
 const pathOk = (p) => { const b = Buffer.from(p); return b.length === expected.length && timingSafeEqual(b, expected); };
 
+const MAX_BODY = 1 << 20;
 async function readJson(req) {
-  let d = ""; for await (const c of req) d += c;
+  let d = ""; for await (const c of req) { d += c; if (d.length > MAX_BODY) throw new Error("request body too large"); }
   return d ? JSON.parse(d) : undefined;
 }
 

@@ -1,7 +1,7 @@
 {
   "name": "spotify-library-mcp",
   "version": "1.3.0",
-  "description": "Local MCP server + CLI for managing your own Spotify library and playlists",
+  "description": "Local single-user MCP server + CLI for tidying your own Spotify library (fork of oliver-virt/spotify-library-mcp)",
   "type": "module",
   "bin": {
     "spot": "bin/spot.js"
@@ -11,9 +11,7 @@
     "start": "node src/server.js",
     "test": "node --test test/*.test.js",
     "test:mock": "node test/mock-spotify.js",
-    "start:http": "node src/http.js",
-    "tunnel": "bash scripts/tunnel.sh",
-    "pull": "node scripts/pull.js"
+    "start:http": "node src/http.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.0",

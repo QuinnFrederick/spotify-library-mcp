@@ -36,11 +36,9 @@ export function summarizeTracks(tracks) {
   }
   const seen = new Map(), dupes = [];
   for (const t of tracks) { const k = fuzzyKey(t); if (seen.has(k)) dupes.push({ name: t.name, artists: t.artists, ids: [seen.get(k), t.id] }); else seen.set(k, t.id); }
-  const hebrew = tracks.filter((t) => /[֐-׿]/.test(t.name + t.artists)).length;
   return {
     tracks: tracks.length, runtime: fmt(ms), distinct_artists: Object.keys(artists).length,
     top_artists: top(artists), decades: Object.fromEntries(Object.entries(decades).sort()), added_by_year: added,
-    hebrew_share: tracks.length ? Math.round((100 * hebrew) / tracks.length) + "%" : "0%",
     duplicates: dupes.length, duplicate_examples: dupes.slice(0, 10),
     most_overrepresented: top(artists, 1)[0] && Math.round((100 * top(artists, 1)[0].count) / tracks.length) + "% " + top(artists, 1)[0].name,
   };

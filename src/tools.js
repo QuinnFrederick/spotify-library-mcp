@@ -10,7 +10,9 @@ const server = new McpServer({ name: "spotify-library", version: "1.1.0" }, { in
 - search is name-based and returns karaoke/covers freely: use find_track (artist-verified) when you know the artist.
 - Playlist item endpoints are /items; saving likes uses /me/library (20 per call). All handled internally.
 - /search has a per-app daily budget (~1000/day → 429 with retry-after ≈ 21h). This server enforces a cap (default 800/day), caches results, and remembers bans. Call get_search_budget before bulk work; find_track/search throw a clear error when exhausted.
-- Playlists cannot be deleted, only unfollowed (delete_playlist). Owned playlists unfollowed are gone.` });
+- Playlists cannot be deleted, only unfollowed (delete_playlist). Spotify keeps deleted playlists recoverable for ~90 days at spotify.com/account/recover-playlists.
+- Folders are not in the API. Artist genres, audio features, popularity and recommendations are gone.
+- Before bulk renames, merges with delete_sources, or deletes: call snapshot_library first, and confirm with the user.` });
 const json = (data) => ({ content: [{ type: "text", text: JSON.stringify(data, null, 2) }] });
 const tool = (name, description, schema, fn) =>
   server.registerTool(name, { description, inputSchema: schema }, async (args) => {
@@ -42,8 +44,9 @@ tool("remove_saved_tracks", "Remove tracks from Liked Songs.", { track_ids: z.ar
 tool("get_search_budget", "Remaining /search calls for today, cache size, and whether a Spotify search ban is active. Check before bulk searching.", {}, async () => searchBudget());
 tool("get_api_limits", "What this Spotify app can and cannot do (endpoints removed/renamed by Spotify for new apps).", {}, async () => ({
   search_budget: searchBudget(),
-  removed: ["audio-features (no energy/tempo/danceability)", "recommendations", "related-artists", "batch GET /tracks, /artists, /albums", "artist genres field"],
+  removed: ["audio-features (no energy/tempo/danceability)", "recommendations", "related-artists", "batch GET /tracks, /artists, /albums", "artist genres field", "popularity fields", "GET /artists/{id}/top-tracks", "browse/new-releases"],
   renamed: { "/playlists/{id}/tracks": "/playlists/{id}/items", "/users/{id}/playlists": "POST /me/playlists", "/me/tracks": "/me/library (20 uris/call)" },
+  search_limit_max: 10,
   pacing: "150ms min gap. /search: ~1000 calls/day → 429 with retry-after ≈ 21h (per app). Client throws on bans > 60s.",
   playlists: "no delete; unfollow only",
 }));
@@ -58,7 +61,7 @@ tool("list_snapshots", "List saved snapshots.", {}, async () => ({ snapshots: A.
 tool("changes_since", "What changed since a snapshot (default: latest): playlists created/deleted/renamed, tracks added/removed per playlist, likes added/removed.", { snapshot: z.string().optional() }, ({ snapshot }) => A.changesSince(snapshot));
 tool("rediscover", "Liked songs from years ago that no longer appear in top tracks or recent plays — forgotten favourites, spread across artists.", { min_years_ago: z.number().min(0).default(3), limit: z.number().int().min(1).max(200).default(50) }, ({ min_years_ago, limit }) => A.rediscover({ minYearsAgo: min_years_ago, limit }));
 tool("get_saved_tracks", "All tracks the user has Liked.", {}, () => spotify.savedTracks());
-tool("search", "Search Spotify.", { query: z.string(), type: z.enum(["track", "artist", "album", "playlist"]).default("track"), limit: z.number().int().min(1).max(50).default(10) },
+tool("search", "Search Spotify.", { query: z.string(), type: z.enum(["track", "artist", "album", "playlist"]).default("track"), limit: z.number().int().min(1).max(10).default(10) },
   ({ query, type, limit }) => spotify.search(query, type, limit));
 tool("get_top_tracks", "The user's most-played tracks.", { time_range: z.enum(["short_term", "medium_term", "long_term"]).default("medium_term"), limit: z.number().int().min(1).max(50).default(50) },
   ({ time_range, limit }) => spotify.topTracks(time_range, limit));

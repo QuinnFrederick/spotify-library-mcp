@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
-import { readFileSync, writeFileSync, existsSync, unlinkSync } from "node:fs";
+import { readFileSync, writeFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -11,20 +11,16 @@ import { start } from "./mock-spotify.js";
 import { ROOT } from "../src/env.js";
 
 let mock, env;
-const envFile = join(ROOT, ".env");
-let envBackup = null;
+// A throwaway env file: the real .env is never read or written by tests.
+const envFile = join(mkdtempSync(join(tmpdir(), "env-")), ".env");
 
 before(async () => {
   mock = await start();
-  env = { ...process.env, SPOTIFY_ACCOUNTS_URL: mock.url, SPOTIFY_API_URL: mock.url + "/v1", SPOTIFY_CLIENT_ID: "mock", SPOTIFY_REDIRECT_URI: "http://127.0.0.1:8899/callback", NO_BROWSER: "1", SPOTIFY_BUDGET_FILE: join(mkdtempSync(join(tmpdir(), "budget-")), "b.json") };
+  env = { ...process.env, SPOTIFY_ACCOUNTS_URL: mock.url, SPOTIFY_API_URL: mock.url + "/v1", SPOTIFY_CLIENT_ID: "mock", SPOTIFY_REDIRECT_URI: "http://127.0.0.1:8899/callback", NO_BROWSER: "1", SPOTIFY_ENV_FILE: envFile, SPOTIFY_BUDGET_FILE: join(mkdtempSync(join(tmpdir(), "budget-")), "b.json") };
   delete env.SPOTIFY_REFRESH_TOKEN;
-  if (existsSync(envFile)) envBackup = readFileSync(envFile, "utf8");
   writeFileSync(envFile, "SPOTIFY_CLIENT_ID=mock\n");
 });
-after(() => {
-  mock.server.close();
-  if (envBackup === null) unlinkSync(envFile); else writeFileSync(envFile, envBackup);
-});
+after(() => mock.server.close());
 
 test("auth script completes PKCE flow and writes refresh token to .env", async () => {
   const child = spawn("node", ["scripts/auth.js"], { cwd: ROOT, env });
@@ -44,6 +40,7 @@ test("auth script completes PKCE flow and writes refresh token to .env", async (
   await new Promise((r) => child.on("exit", r));
   const saved = readFileSync(envFile, "utf8");
   assert.match(saved, /SPOTIFY_REFRESH_TOKEN=rt-mock-1/);
+  assert.equal(statSync(envFile).mode & 0o777, 0o600, ".env holding the refresh token is owner-only");
   env.SPOTIFY_REFRESH_TOKEN = "rt-mock-1";
 });
 
