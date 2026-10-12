@@ -24,14 +24,16 @@ function load() {
 }
 let state = load();
 const save = () => writeFileSync(FILE, JSON.stringify(state));
-const rollover = () => { if (state.day !== today()) state = { ...fresh(), bannedUntil: state.bannedUntil, apiBannedUntil: state.apiBannedUntil, lastBan: state.lastBan, cache: state.cache }; };
+// The file is the shared truth: a Claude Code MCP server and a CLI run (`npm run index`) are separate processes
+// hitting the same per-app quota, so re-read before every check or spend. (load() also handles the day rollover.)
+const sync = () => { state = load(); };
 const iso = (ms) => (ms > Date.now() ? new Date(ms).toISOString() : null);
 
 export class BudgetError extends Error {}
 
 export const budget = {
   status() {
-    rollover();
+    sync();
     return {
       day: state.day,
       search: { used: state.used, cap: DAILY_CAP, remaining: Math.max(0, DAILY_CAP - state.used), banned_until: iso(state.bannedUntil), cached: Object.keys(state.cache).length },
@@ -52,17 +54,18 @@ export const budget = {
     if (s.banned_until) throw new BudgetError(`Spotify has rate-limited this app until ${s.banned_until} (429 retry-after). No calls are sent until then.`);
     if (s.remaining <= reserve) throw new BudgetError(`Daily Spotify call budget ${reserve ? "for background indexing " : ""}used up (${s.calls}/${s.cap}). Resets at midnight UTC; raise SPOTIFY_DAILY_CALL_CAP at your own risk.`);
   },
-  spend() { rollover(); state.used++; save(); },
-  spendApi() { rollover(); state.calls++; save(); },
+  spend() { sync(); state.used++; save(); },
+  spendApi() { sync(); state.calls++; save(); },
   ban(seconds, path = "/search") {
-    rollover();
+    sync();
     const until = Date.now() + seconds * 1000;
     if (path.endsWith("/search")) state.bannedUntil = until; else state.apiBannedUntil = until;
     state.lastBan = { at: new Date().toISOString(), path, retry_after_s: seconds, calls_today: state.calls, searches_today: state.used };
     save();
   },
-  cacheGet(key) { return state.cache[key]; },
+  cacheGet(key) { sync(); return state.cache[key]; },
   cacheSet(key, val) {
+    sync();
     state.cache[key] = val;
     const keys = Object.keys(state.cache);
     if (keys.length > CACHE_MAX) for (const k of keys.slice(0, keys.length - CACHE_MAX)) delete state.cache[k];
