@@ -2,6 +2,7 @@
 .search-budget.json
 .tokens.json
 backups/
+cache/
 node_modules/
 library.json
 .DS_Store

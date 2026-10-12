@@ -38,9 +38,28 @@ It also already has every capability on the list: list, rename, create, merge, d
 - **HTTP entry:** binds to 127.0.0.1, and the path secret is compared in constant time. On its own it has **no real auth**, so it should only ever be reached through your OAuth gateway, never a public tunnel. That's why `tunnel.sh` was removed.
 - **Policy flag:** listening-room's rule was that Spotify content must never reach an LLM. Spotify's Developer Terms forbid ingesting Spotify content into AI models. This MCP's whole purpose is to show your playlists and tracks to Claude. It's your own data on a single-user dev-mode app, but the worst case is Spotify revoking the app. That rule has **not** been carried over; this is your call. Spotify's official Claude connector exists if you ever want the sanctioned route for basics.
 
+## Live test and a 24-hour lockout (2026-10-12)
+
+The first test against your real account (546 owned playlists) tripped Spotify's limit. Listing, the token refresh and a verified search all worked. Then the full-library read (≈500+ calls in under 3 minutes) got a 429 on **every endpoint**, with a ~24-hour retry-after (until about 16:24 BST on 13 October). Nothing in your library changed. Oliver's ~40-playlist library never came close to this limit.
+
+**Fixed since:**
+- every non-search call now counts against a daily cap (400)
+- a long 429 on any endpoint is remembered, and no calls are sent until it lifts. The current lockout is already recorded in `.search-budget.json`.
+- playlists are cached on disk by `snapshot_id`, so only changed ones are re-read
+- the first full index spreads over about two days and resumes by itself; until it's complete, the tools report `coverage`
+- reading a playlist now takes one call instead of two
+
+The test suite now has 18 tests. The live write test (create, add, rename, remove and delete a throwaway playlist) is still to do once the lockout lifts.
+
 ## What Quinn does next
 1. Fix GitHub auth (`gh auth login`), then publish the fork: `cd ~/code/spotify-library-mcp && gh repo fork --remote --remote-name origin`. Oliver's repo is already set as `upstream`, and the local commits sit on top of it. (`gh` was logged out, so I couldn't fork it.)
 2. At developer.spotify.com, create (or reuse) your one app, add the redirect URI `http://127.0.0.1:8888/callback`, and put the Client ID in `.env`. Dev-mode apps need the owner to have Premium.
 3. Run `npm run auth` and approve in the browser, then check it with `node bin/spot.js playlists`.
-4. Try it locally in Claude Code: `claude mcp add --scope user spotify-library -- node ~/code/spotify-library-mcp/src/server.js`. Start with `summarize_library`.
+4. Add it to Claude Code (done 2026-10-12, user scope):
+
+   ```bash
+   claude mcp add --scope user spotify-library -- node /Users/quinn/code/spotify-library-mcp/src/server.js
+   ```
+
+   After the lockout lifts, run `npm run index` once a day until it reports `"complete": true` (about two days). Then try `summarize_library` in Claude.
 5. Later, for the phone: run `npm run start:http` under launchd on 127.0.0.1 and mount it on the OAuth gateway, following the WhatsApp MCP pattern in mac-mini-dev. Don't put `SPOTIFY_REFRESH_TOKEN` in the plist, because real environment variables override `.env` and would win over the rotated token.

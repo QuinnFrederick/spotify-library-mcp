@@ -15,7 +15,7 @@ const base = "http://127.0.0.1:8790";
 
 before(async () => {
   mock = await start();
-  const env = { ...process.env, SPOTIFY_ACCOUNTS_URL: mock.url, SPOTIFY_API_URL: mock.url + "/v1", SPOTIFY_CLIENT_ID: "mock", SPOTIFY_REFRESH_TOKEN: "rt-mock-1", MCP_SECRET: SECRET, PORT: "8790", SPOTIFY_BUDGET_FILE: join(mkdtempSync(join(tmpdir(), "budget-")), "b.json") };
+  const env = { ...process.env, SPOTIFY_ACCOUNTS_URL: mock.url, SPOTIFY_API_URL: mock.url + "/v1", SPOTIFY_CLIENT_ID: "mock", SPOTIFY_REFRESH_TOKEN: "rt-mock-1", MCP_SECRET: SECRET, PORT: "8790", SPOTIFY_BUDGET_FILE: join(mkdtempSync(join(tmpdir(), "budget-")), "b.json"), SPOTIFY_CACHE_DIR: join(mkdtempSync(join(tmpdir(), "cache-")), "c") };
   child = spawn("node", ["src/http.js"], { cwd: ROOT, env, stdio: ["ignore", "pipe", "inherit"] });
   await new Promise((r) => child.stdout.on("data", (d) => d.toString().includes("listening") && r()));
 });

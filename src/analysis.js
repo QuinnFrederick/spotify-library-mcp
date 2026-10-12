@@ -3,20 +3,11 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from 
 import { join } from "node:path";
 import { spotify } from "./spotify.js";
 import { ROOT } from "./env.js";
+import { libraryIndex } from "./library.js";
+export { libraryIndex };
 
 const SNAP_DIR = process.env.SPOTIFY_SNAPSHOT_DIR ?? join(ROOT, "backups");
-let index = null, indexAt = 0;
-const TTL = Number(process.env.SPOTIFY_INDEX_TTL_MS ?? 10 * 60 * 1000);
-
-export async function libraryIndex({ refresh = false } = {}) {
-  if (index && !refresh && Date.now() - indexAt < TTL) return index;
-  const playlists = {};
-  for (const p of (await spotify.listPlaylists()).filter((p) => p.mine)) playlists[p.id] = await spotify.getPlaylist(p.id);
-  const liked = await spotify.savedTracks();
-  index = { playlists, liked, fetchedAt: new Date().toISOString() };
-  indexAt = Date.now();
-  return index;
-}
+const PER_PLAYLIST_MAX = 50;
 
 const year = (t) => Number((t.release ?? "").slice(0, 4)) || null;
 const decade = (t) => { const y = year(t); return y ? `${Math.floor(y / 10) * 10}s` : "unknown"; };
@@ -50,7 +41,7 @@ export async function summarizePlaylist(id) {
 }
 
 export async function summarizeLibrary() {
-  const { playlists, liked } = await libraryIndex();
+  const { playlists, liked, coverage } = await libraryIndex();
   const inPl = new Set(Object.values(playlists).flatMap((p) => p.tracks.map((t) => t.id)));
   const orphans = liked.filter((t) => !inPl.has(t.id));
   const all = new Map(); for (const t of [...liked, ...Object.values(playlists).flatMap((p) => p.tracks)]) all.set(t.id, t);
@@ -62,29 +53,31 @@ export async function summarizeLibrary() {
     if (n >= 3) overlaps.push({ a: playlists[ids[i]].name, b: playlists[ids[j]].name, shared: n });
   }
   return {
+    coverage,
     playlists: perPl.length, liked: liked.length, unique_tracks: all.size,
     liked_in_no_playlist: orphans.length, orphan_examples: orphans.slice(0, 10).map((t) => `${t.name} – ${t.artists}`),
     stale_playlists: perPl.filter((p) => p.last_added && p.last_added < new Date(Date.now() - 2 * 365 * 864e5).toISOString().slice(0, 10)).map((p) => p.name),
     empty_playlists: perPl.filter((p) => !p.tracks).map((p) => p.name),
     overlaps: overlaps.sort((a, b) => b.shared - a.shared).slice(0, 15),
-    per_playlist: perPl, liked_summary: summarizeTracks(liked),
+    per_playlist: perPl.length > PER_PLAYLIST_MAX ? { note: `largest ${PER_PLAYLIST_MAX} of ${perPl.length}; use list_playlists for all`, items: [...perPl].sort((a, b) => b.tracks - a.tracks).slice(0, PER_PLAYLIST_MAX) } : perPl,
+    liked_summary: summarizeTracks(liked),
   };
 }
 
 export async function findInPlaylists(query) {
-  const { playlists, liked } = await libraryIndex();
+  const { playlists, liked, coverage } = await libraryIndex();
   const q = query.toLowerCase();
   const hit = (t) => `${t.name} ${t.artists}`.toLowerCase().includes(q) || t.id === query || t.uri === query;
   const out = [];
   for (const p of Object.values(playlists)) for (const t of p.tracks) if (hit(t)) out.push({ playlist: p.name, playlist_id: p.id, track: `${t.name} – ${t.artists}`, id: t.id, added_at: t.added_at });
-  return { matches: out, liked: liked.filter(hit).map((t) => `${t.name} – ${t.artists}`) };
+  return { coverage, matches: out, liked: liked.filter(hit).map((t) => `${t.name} – ${t.artists}`) };
 }
 
 export async function dedupeReport() {
-  const { playlists } = await libraryIndex();
+  const { playlists, coverage } = await libraryIndex();
   const within = {}; let total = 0;
   for (const p of Object.values(playlists)) { const d = summarizeTracks(p.tracks); if (d.duplicates) { within[p.name] = d.duplicate_examples; total += d.duplicates; } }
-  return { duplicates_within_playlists: total, details: within, note: "Use remove_tracks with the second id of each pair to fix. Cross-playlist overlap is in summarize_library.overlaps." };
+  return { coverage, duplicates_within_playlists: total, details: within, note: "Use remove_tracks with the second id of each pair to fix. Cross-playlist overlap is in summarize_library.overlaps." };
 }
 
 export async function playlistDiff(aId, bId) {
@@ -97,11 +90,12 @@ export async function playlistDiff(aId, bId) {
 
 // Snapshots: whole-library JSON on disk; "what changed since" diffs against the latest (or a named) snapshot.
 export async function snapshotLibrary(label = "") {
-  const { playlists, liked } = await libraryIndex({ refresh: true });
+  const { playlists, liked, coverage } = await libraryIndex({ refresh: true });
   mkdirSync(SNAP_DIR, { recursive: true });
-  const name = `snapshot-${new Date().toISOString().replace(/[:.]/g, "-")}${label ? "-" + label : ""}.json`;
-  writeFileSync(join(SNAP_DIR, name), JSON.stringify({ playlists, liked }));
-  return { file: name, playlists: Object.keys(playlists).length, liked: liked.length };
+  const partial = !coverage.complete;
+  const name = `snapshot-${new Date().toISOString().replace(/[:.]/g, "-")}${label ? "-" + label : ""}${partial ? "-PARTIAL" : ""}.json`;
+  writeFileSync(join(SNAP_DIR, name), JSON.stringify({ coverage, playlists, liked }));
+  return { file: name, partial, coverage, playlists: Object.keys(playlists).length, liked: liked.length, ...(partial ? { warning: "Snapshot is incomplete: not every playlist could be read within today's budget. Don't rely on it as a full backup yet." } : {}) };
 }
 export function listSnapshots() { return existsSync(SNAP_DIR) ? readdirSync(SNAP_DIR).filter((f) => f.endsWith(".json")).sort() : []; }
 export async function changesSince(file) {
@@ -109,9 +103,10 @@ export async function changesSince(file) {
   if (!pick) return { error: "no snapshots yet; call snapshot_library first" };
   const old = JSON.parse(readFileSync(join(SNAP_DIR, pick), "utf8"));
   const cur = await libraryIndex({ refresh: true });
-  const oldPl = old.playlists ?? {}, out = { since: pick, playlists: [] };
+  const oldPl = old.playlists ?? {}, out = { since: pick, coverage: cur.coverage, playlists: [] };
   const names = new Map(Object.values(oldPl).map((p) => [p.id, p.name]));
   for (const id of new Set([...Object.keys(oldPl), ...Object.keys(cur.playlists)])) {
+    if (cur.unindexed.has(id)) continue; // listed but not readable today: not "deleted"
     const o = oldPl[id], c = cur.playlists[id];
     if (!o) { out.playlists.push({ name: c.name, status: "created", tracks: c.tracks.length }); continue; }
     if (!c) { out.playlists.push({ name: names.get(id), status: "deleted", tracks: o.tracks.length }); continue; }
@@ -135,5 +130,5 @@ export async function rediscover({ minYearsAgo = 3, limit = 50 } = {}) {
   // spread across years and artists so it's not 50 songs by one band
   const seen = {}, out = [];
   for (const t of old.sort((a, b) => a.added_at.localeCompare(b.added_at))) { const a = primary(t); if ((seen[a] || 0) >= 3) continue; seen[a] = (seen[a] || 0) + 1; out.push(t); }
-  return { candidates: old.length, tracks: out.slice(0, limit).map((t) => ({ id: t.id, track: `${t.name} – ${t.artists}`, liked_on: t.added_at.slice(0, 10) })) };
+  return { liked_complete: (await libraryIndex()).coverage.liked_complete, candidates: old.length, tracks: out.slice(0, limit).map((t) => ({ id: t.id, track: `${t.name} – ${t.artists}`, liked_on: t.added_at.slice(0, 10) })) };
 }

@@ -1,5 +1,5 @@
 import { loadEnv, setEnvValue } from "./env.js";
-import { budget } from "./budget.js";
+import { budget, BudgetError } from "./budget.js";
 
 loadEnv();
 
@@ -68,13 +68,16 @@ async function token() {
   return refreshAccessToken();
 }
 
-export async function api(method, path, { query, body, retries = 3 } = {}) {
+// reserve: leave this many of today's calls unused (background indexing keeps headroom for interactive tools).
+export async function api(method, path, { query, body, retries = 3, reserve = 0 } = {}) {
   const url = new URL(path.startsWith("http") ? path : API + path);
   // Absolute URLs come from `next` links; never send the bearer token anywhere but the API host.
   if (url.origin !== new URL(API).origin) throw new Error(`Refusing non-Spotify URL ${url.origin}`);
   const rel = url.pathname.replace(/^\/v1/, "");
   const readingLikes = method === "GET" && rel === "/me/tracks"; // GET /me/tracks still works; only PUT/DELETE moved
   if (!readingLikes) for (const [re, msg] of GONE) if (re.test(rel)) throw new Error(`Spotify API limit: ${msg}`);
+  const isSearch = rel === "/search";
+  if (!isSearch) budget.checkApi({ reserve });
   await pace();
   if (query) for (const [k, v] of Object.entries(query)) if (v !== undefined && v !== null) url.searchParams.set(k, String(v));
   let res;
@@ -86,6 +89,7 @@ export async function api(method, path, { query, body, retries = 3 } = {}) {
         body: body ? JSON.stringify(body) : undefined,
         signal: AbortSignal.timeout(20000),
       });
+      if (!isSearch) budget.spendApi();
       break;
     } catch (e) {
       if (attempt >= 6) throw e;
@@ -96,16 +100,17 @@ export async function api(method, path, { query, body, retries = 3 } = {}) {
   }
   if (res.status === 429) {
     const secs = Number(res.headers.get("retry-after")) || 1;
-    // Spotify hands out multi-hour bans on /search (e.g. 75469s after ~1000 searches/day). Never sleep through those.
-    if (secs > 60 && url.pathname.endsWith("/search")) budget.ban(secs);
-    if (secs > 60 || retries === 0) throw new Error(`Spotify rate limit on ${url.pathname}: retry after ${secs}s (~${(secs / 3600).toFixed(1)}h). Per-app limit (and Spotify now allows one client id per developer).`);
+    // Spotify hands out multi-hour bans (75469s on /search, 85784s app-wide after a bulk walk). Never sleep through
+    // those, and remember them so nothing else is sent until they lift.
+    if (secs > 60) budget.ban(secs, url.pathname);
+    if (secs > 60 || retries === 0) throw new BudgetError(`Spotify rate limit on ${url.pathname}: retry after ${secs}s (~${(secs / 3600).toFixed(1)}h). Per-app limit (and Spotify now allows one client id per developer).`);
     const wait = secs * 1000;
     await new Promise((r) => setTimeout(r, wait));
-    return api(method, path, { query, body, retries: retries - 1 });
+    return api(method, path, { query, body, retries: retries - 1, reserve });
   }
   if (res.status === 401 && retries > 0) {
     accessToken = null;
-    return api(method, path, { query, body, retries: 0 });
+    return api(method, path, { query, body, retries: 0, reserve });
   }
   if (!res.ok) throw new Error(`Spotify ${method} ${url.pathname} → ${res.status}: ${await res.text()}`);
   if (res.status === 204) return null;
@@ -114,16 +119,15 @@ export async function api(method, path, { query, body, retries = 3 } = {}) {
 }
 
 // Walk a paginated endpoint to completion.
-export async function paginate(path, query = {}, limit = 50) {
+export async function paginate(path, query = {}, limit = 50, { reserve = 0 } = {}) {
   const items = [];
-  let next = null;
-  let page = await api("GET", path, { query: { ...query, limit } });
+  let page = await api("GET", path, { query: { ...query, limit }, reserve });
   for (;;) {
     items.push(...page.items);
-    next = page.next;
-    if (!next) break;
-    page = await api("GET", next);
+    if (!page.next) break;
+    page = await api("GET", page.next, { reserve });
   }
+  if (typeof page.total === "number" && items.length < page.total) process.stderr.write(`warning: ${path} returned ${items.length} of ${page.total} items\n`);
   return items;
 }
 
@@ -164,14 +168,20 @@ export const spotify = {
       collaborative: p.collaborative,
       owner: p.owner?.display_name ?? p.owner?.id,
       mine: p.owner?.id === me.id,
+      snapshot_id: p.snapshot_id,
       url: p.external_urls?.spotify,
     }));
   },
 
   async getPlaylist(id) {
     const p = await api("GET", `/playlists/${id}`, { query: { fields: "id,name,description,public,owner(id,display_name),items.total,snapshot_id" } });
-    const items = await paginate(`/playlists/${id}/items`, { fields: "next,items(added_at,item(id,uri,name,duration_ms,artists(name),album(name)))" }, 100);
-    return { id: p.id, name: p.name, description: p.description, public: p.public, owner: p.owner, snapshot_id: p.snapshot_id, total: p.items?.total, tracks: items.map((i) => ({ added_at: i.added_at, ...slimTrack(i.item ?? i.track) })).filter((t) => t.id) };
+    return { id: p.id, name: p.name, description: p.description, public: p.public, owner: p.owner, snapshot_id: p.snapshot_id, total: p.items?.total, tracks: await this.playlistTracks(id) };
+  },
+
+  // Items only (one call per 100 tracks): the library index already has name/snapshot_id from the listing.
+  async playlistTracks(id, { reserve = 0 } = {}) {
+    const items = await paginate(`/playlists/${id}/items`, { fields: "next,total,items(added_at,item(id,uri,name,duration_ms,artists(name),album(name,release_date)))" }, 100, { reserve });
+    return items.map((i) => ({ added_at: i.added_at, ...slimTrack(i.item ?? i.track) })).filter((t) => t.id);
   },
 
   async createPlaylist({ name, description = "", isPublic = false }) {

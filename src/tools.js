@@ -3,6 +3,9 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { spotify, searchBudget } from "./spotify.js";
 import * as A from "./analysis.js";
+import { invalidate } from "./library.js";
+
+const WRITES = new Set(["create_playlist", "update_playlist", "add_tracks", "remove_tracks", "delete_playlist", "merge_playlists", "save_tracks", "remove_saved_tracks"]);
 
 export function createServer() {
 const server = new McpServer({ name: "spotify-library", version: "1.1.0" }, { instructions: `Spotify Web API limits (2026, new apps) baked into this server:
@@ -10,13 +13,14 @@ const server = new McpServer({ name: "spotify-library", version: "1.1.0" }, { in
 - search is name-based and returns karaoke/covers freely: use find_track (artist-verified) when you know the artist.
 - Playlist item endpoints are /items; saving likes uses /me/library (20 per call). All handled internally.
 - /search has a per-app daily budget (~1000/day → 429 with retry-after ≈ 21h). This server enforces a cap (default 800/day), caches results, and remembers bans. Call get_search_budget before bulk work; find_track/search throw a clear error when exhausted.
+- Large libraries: all other calls have a daily cap too (default 400; a ~550-playlist walk got the whole app banned for 24h). Analysis tools read playlists from a disk cache keyed by snapshot_id, so only changed playlists cost calls. If coverage.complete is false, say the results are partial and how much is covered; the index resumes on the next call or day.
 - Playlists cannot be deleted, only unfollowed (delete_playlist). Spotify keeps deleted playlists recoverable for ~90 days at spotify.com/account/recover-playlists.
 - Folders are not in the API. Artist genres, audio features, popularity and recommendations are gone.
 - Before bulk renames, merges with delete_sources, or deletes: call snapshot_library first, and confirm with the user.` });
 const json = (data) => ({ content: [{ type: "text", text: JSON.stringify(data, null, 2) }] });
 const tool = (name, description, schema, fn) =>
   server.registerTool(name, { description, inputSchema: schema }, async (args) => {
-    try { return json(await fn(args)); }
+    try { const out = await fn(args); if (WRITES.has(name)) invalidate(); return json(out); }
     catch (e) { return { isError: true, content: [{ type: "text", text: e.message }] }; }
   });
 
@@ -41,7 +45,7 @@ tool("find_track", "Find one track, verifying the artist is on the result (avoid
   { track: z.string(), artist: z.string() }, ({ track, artist }) => spotify.findTrack(track, artist));
 tool("save_tracks", "Add tracks to the user's Liked Songs.", { track_ids: z.array(z.string()).min(1).max(200) }, ({ track_ids }) => spotify.saveTracks(track_ids));
 tool("remove_saved_tracks", "Remove tracks from Liked Songs.", { track_ids: z.array(z.string()).min(1).max(200) }, ({ track_ids }) => spotify.removeSavedTracks(track_ids));
-tool("get_search_budget", "Remaining /search calls for today, cache size, and whether a Spotify search ban is active. Check before bulk searching.", {}, async () => searchBudget());
+tool("get_search_budget", "Today's Spotify budgets: /search calls and all other API calls (remaining, caps), any active rate-limit ban, and what tripped the last one. Check before bulk work.", {}, async () => searchBudget());
 tool("get_api_limits", "What this Spotify app can and cannot do (endpoints removed/renamed by Spotify for new apps).", {}, async () => ({
   search_budget: searchBudget(),
   removed: ["audio-features (no energy/tempo/danceability)", "recommendations", "related-artists", "batch GET /tracks, /artists, /albums", "artist genres field", "popularity fields", "GET /artists/{id}/top-tracks", "browse/new-releases"],

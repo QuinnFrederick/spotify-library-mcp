@@ -2,6 +2,7 @@
 // Tiny CLI over the same client: `spot <command> [json-args]`
 import { spotify } from "../src/spotify.js";
 import * as A from "../src/analysis.js";
+import { budget } from "../src/budget.js";
 
 const [cmd, ...rest] = process.argv.slice(2);
 const commands = {
@@ -26,6 +27,8 @@ const commands = {
   diff: (a, b) => A.playlistDiff(a, b),
   snapshot: (label) => A.snapshotLibrary(label),
   changes: (file) => A.changesSince(file),
+  index: async () => ({ coverage: (await A.libraryIndex({ refresh: true })).coverage, budget: budget.status().api }),
+  budget: () => budget.status(),
   rediscover: (years, limit) => A.rediscover({ minYearsAgo: years && Number(years), limit: limit && Number(limit) }),
 };
 if (!commands[cmd]) {

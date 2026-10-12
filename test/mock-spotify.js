@@ -15,6 +15,7 @@ export function start(port = 0) {
     libraryCalls: [],
     rotateRefresh: false,
     searchLimits: [],
+    apiStatus: null,
   };
   const mkTrack = (n) => ({ id: `t${n}`, uri: `spotify:track:t${n}`, name: `Track ${n}`, duration_ms: 1000 * n, artists: [{ name: `Artist ${n}` }], album: { name: `Album ${n}`, release_date: `${1970 + (n * 7) % 56}-01-01` } });
   const addPl = (id, name, ids) => state.playlists.set(id, { id, name, description: "", public: false, collaborative: false, owner: state.me, snapshot_id: "s1", external_urls: { spotify: `https://open.spotify.com/playlist/${id}` }, items: ids.map((n) => ({ added_at: "2024-01-01T00:00:00Z", item: mkTrack(n) })) });
@@ -64,6 +65,7 @@ export function start(port = 0) {
     const offset = Number(url.searchParams.get("offset") ?? 0), limit = Number(url.searchParams.get("limit") ?? 20);
     const plSummary = (pl) => ({ ...pl, items: { total: pl.items.length } });
     let m;
+    if (state.apiStatus && p !== "/v1/search") { res.writeHead(state.apiStatus[0], { "retry-after": String(state.apiStatus[1]) }); return res.end(); }
     if (p === "/v1/me") return send(res, 200, state.me);
     if (p === "/v1/me/playlists" && req.method === "GET") return send(res, 200, page(url.origin + p, [...state.playlists.values()].map(plSummary), offset, limit));
     if (p === "/v1/me/tracks") return send(res, 200, page(url.origin + p, state.saved, offset, limit));
@@ -77,7 +79,7 @@ export function start(port = 0) {
       const uris = (url.searchParams.get("uris") ?? "").split(",").filter(Boolean);
       if (uris.length > 20) return send(res, 400, { error: { status: 400, message: "Too many uris requested" } });
       state.libraryCalls.push(uris);
-      if (req.method === "PUT") for (const u of uris) state.saved.push({ added_at: "2026-01-01T00:00:00Z", track: mkTrack(u.split(":").pop().slice(1)) });
+      if (req.method === "PUT") for (const u of uris) state.saved.unshift({ added_at: "2026-01-01T00:00:00Z", track: mkTrack(u.split(":").pop().slice(1)) });
       if (req.method === "DELETE") { const rm = new Set(uris); state.saved = state.saved.filter((i) => !rm.has(i.track.uri)); }
       return send(res, 200, null);
     }

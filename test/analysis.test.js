@@ -9,7 +9,7 @@ let mock, spotify, A;
 before(async () => {
   mock = await start();
   const dir = mkdtempSync(join(tmpdir(), "analysis-"));
-  Object.assign(process.env, { SPOTIFY_ACCOUNTS_URL: mock.url, SPOTIFY_API_URL: mock.url + "/v1", SPOTIFY_CLIENT_ID: "mock", SPOTIFY_REFRESH_TOKEN: "rt-mock-1", SPOTIFY_MIN_GAP_MS: "0", SPOTIFY_BUDGET_FILE: join(dir, "b.json"), SPOTIFY_SNAPSHOT_DIR: join(dir, "snaps"), SPOTIFY_INDEX_TTL_MS: "0" });
+  Object.assign(process.env, { SPOTIFY_ACCOUNTS_URL: mock.url, SPOTIFY_API_URL: mock.url + "/v1", SPOTIFY_CLIENT_ID: "mock", SPOTIFY_REFRESH_TOKEN: "rt-mock-1", SPOTIFY_MIN_GAP_MS: "0", SPOTIFY_BUDGET_FILE: join(dir, "b.json"), SPOTIFY_CACHE_DIR: join(mkdtempSync(join(tmpdir(), "cache-")), "c"), SPOTIFY_SNAPSHOT_DIR: join(dir, "snaps"), SPOTIFY_INDEX_TTL_MS: "0" });
   ({ spotify } = await import("../src/spotify.js"));
   A = await import("../src/analysis.js");
 });

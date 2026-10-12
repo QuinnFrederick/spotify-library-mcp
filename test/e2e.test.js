@@ -16,7 +16,7 @@ const envFile = join(mkdtempSync(join(tmpdir(), "env-")), ".env");
 
 before(async () => {
   mock = await start();
-  env = { ...process.env, SPOTIFY_ACCOUNTS_URL: mock.url, SPOTIFY_API_URL: mock.url + "/v1", SPOTIFY_CLIENT_ID: "mock", SPOTIFY_REDIRECT_URI: "http://127.0.0.1:8899/callback", NO_BROWSER: "1", SPOTIFY_ENV_FILE: envFile, SPOTIFY_BUDGET_FILE: join(mkdtempSync(join(tmpdir(), "budget-")), "b.json") };
+  env = { ...process.env, SPOTIFY_ACCOUNTS_URL: mock.url, SPOTIFY_API_URL: mock.url + "/v1", SPOTIFY_CLIENT_ID: "mock", SPOTIFY_REDIRECT_URI: "http://127.0.0.1:8899/callback", NO_BROWSER: "1", SPOTIFY_ENV_FILE: envFile, SPOTIFY_BUDGET_FILE: join(mkdtempSync(join(tmpdir(), "budget-")), "b.json"), SPOTIFY_CACHE_DIR: join(mkdtempSync(join(tmpdir(), "cache-")), "c") };
   delete env.SPOTIFY_REFRESH_TOKEN;
   writeFileSync(envFile, "SPOTIFY_CLIENT_ID=mock\n");
 });

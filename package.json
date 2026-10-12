@@ -11,7 +11,8 @@
     "start": "node src/server.js",
     "test": "node --test test/*.test.js",
     "test:mock": "node test/mock-spotify.js",
-    "start:http": "node src/http.js"
+    "start:http": "node src/http.js",
+    "index": "node bin/spot.js index"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.0",

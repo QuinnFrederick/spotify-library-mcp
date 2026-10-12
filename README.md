@@ -37,6 +37,8 @@ node bin/spot.js dupes
 node bin/spot.js diff <a> <b>
 node bin/spot.js snapshot weekly && node bin/spot.js changes
 node bin/spot.js rediscover 4 50
+node bin/spot.js index              # build/refresh the playlist cache (budgeted, resumable)
+node bin/spot.js budget             # today's call and search budgets, any active ban
 ```
 
 ## Tools
@@ -75,6 +77,7 @@ node bin/spot.js rediscover 4 50
 | name-only search | returns karaoke/covers | `find_track` tool verifies the artist |
 | `/search` quota | **~1000/day per app → 429 with `retry-after ≈ 21h`** | persistent daily budget (default 800, `SPOTIFY_SEARCH_DAILY_CAP`), result cache, ban memory — see below |
 | ~500 rapid calls | silent TLS-level drop for ~10 min (no 429) | 150 ms pacing + retry with backoff |
+| ~500+ calls walking a big library | **429 on every endpoint, `retry-after ≈ 24h`** (2026-10-12, ~550 playlists) | daily call cap (default 400, `SPOTIFY_DAILY_CALL_CAP`), app-wide ban memory, disk-cached incremental index — see below |
 
 `get_api_limits` tool returns this list to the model; the server's MCP `instructions` carry the summary too.
 
@@ -89,3 +92,13 @@ What the server does about it (`src/budget.js`, state in `.search-budget.json`):
 - `get_search_budget` tool / `searchBudget()` report remaining, cached, banned-until
 
 Spotify now allows one client id per developer, so a second app is not an escape hatch.
+
+### Large libraries (learned 2026-10-12)
+
+Reading every playlist of a ~550-playlist library in one go (≈500+ calls in under 3 minutes) got the **whole app** a 429 with `retry-after: 85784` (≈24 h). Search kept working, so it has its own bucket. So:
+- every non-search call counts against a daily cap (`SPOTIFY_DAILY_CALL_CAP`, default 400 — a guess below what tripped it; `last_ban` in `get_search_budget` records the count the next time one happens, so it can be tuned)
+- a long 429 on any endpoint is remembered and nothing is sent until it lifts
+- the analysis tools read playlists from `cache/` (git-ignored), keyed by each playlist's `snapshot_id`, so only changed playlists cost calls. Indexing stops 50 calls short of the cap (`SPOTIFY_INDEX_RESERVE`) and resumes on the next call or day; results carry `coverage` until it's complete
+- `npm run index` builds or refreshes the cache outside a chat; `node bin/spot.js budget` shows today's counters
+
+A first full index of ~550 playlists takes about two days at the default cap. After that, a refresh of an unchanged library costs roughly one call per 50 playlists.
