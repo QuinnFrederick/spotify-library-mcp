@@ -8,8 +8,8 @@ import { ROOT } from "./env.js";
 
 const FILE = process.env.SPOTIFY_BUDGET_FILE ?? join(ROOT, ".search-budget.json");
 export const DAILY_CAP = Number(process.env.SPOTIFY_SEARCH_DAILY_CAP ?? 800); // safety margin under ~1000
-// A guess below the ~500 calls that triggered the 24h ban. lastBan records what actually tripped it, so this can be tuned.
-export const DAILY_CALL_CAP = Number(process.env.SPOTIFY_DAILY_CALL_CAP ?? 400);
+// Deliberately low: ~350 calls plus another session's unknown share tripped a 24h ban on 2026-10-12. lastBan records what actually tripped it, so this can be tuned.
+export const DAILY_CALL_CAP = Number(process.env.SPOTIFY_DAILY_CALL_CAP ?? 250);
 const CACHE_MAX = 5000;
 
 const today = () => new Date().toISOString().slice(0, 10);

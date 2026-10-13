@@ -27,7 +27,7 @@ const commands = {
   diff: (a, b) => A.playlistDiff(a, b),
   snapshot: (label) => A.snapshotLibrary(label),
   changes: (file) => A.changesSince(file),
-  index: async () => ({ coverage: (await A.libraryIndex({ refresh: true })).coverage, budget: budget.status().api }),
+  index: async () => ({ coverage: (await A.libraryIndex()).coverage, budget: budget.status().api }),
   budget: () => budget.status(),
   rediscover: (years, limit) => A.rediscover({ minYearsAgo: years && Number(years), limit: limit && Number(limit) }),
 };

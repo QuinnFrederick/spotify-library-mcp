@@ -15,23 +15,40 @@ const CACHE_DIR = process.env.SPOTIFY_CACHE_DIR ?? join(ROOT, "cache");
 const RESERVE = Number(process.env.SPOTIFY_INDEX_RESERVE ?? 50);
 const TTL = Number(process.env.SPOTIFY_INDEX_TTL_MS ?? 10 * 60 * 1000);
 const LIKED_FULL_DAYS = Number(process.env.SPOTIFY_LIKED_FULL_DAYS ?? 7);
+const LISTING_TTL = Number(process.env.SPOTIFY_LISTING_TTL_MS ?? 60 * 60 * 1000);
 
 const plDir = () => join(CACHE_DIR, "playlists");
 const read = (f) => { try { return JSON.parse(readFileSync(f, "utf8")); } catch { return null; } };
 const write = (f, v) => { mkdirSync(join(f, ".."), { recursive: true }); writeFileSync(f, JSON.stringify(v)); };
 const slimLiked = (i) => ({ added_at: i.added_at, id: i.track?.id, uri: i.track?.uri, name: i.track?.name, artists: (i.track?.artists ?? []).map((a) => a.name).join(", "), album: i.track?.album?.name, duration_ms: i.track?.duration_ms, release: i.track?.album?.release_date });
 
-let memo = null, memoAt = 0;
+let memo = null, memoAt = 0, relistNext = false;
+
+// The playlist listing (~16 calls for 775 playlists) is saved to cache/playlists.json and reused for LISTING_TTL,
+// so an index run interrupted by the budget doesn't pay for it again. `relist` forces a fresh one.
+async function listing(relist) {
+  const file = join(CACHE_DIR, "playlists.json");
+  const c = read(file);
+  if (c && !relist && !relistNext && !c.partial && Date.now() - Date.parse(c.fetched_at) < LISTING_TTL) return c.playlists.map((p) => ({ ...p, mine: p.mine ?? p.owner === c.me }));
+  const playlists = await spotify.listPlaylists();
+  relistNext = false;
+  write(file, { fetched_at: new Date().toISOString(), total_reported: playlists.length, playlists });
+  return playlists;
+}
 
 export async function libraryIndex({ refresh = false } = {}) {
   if (memo && !refresh && Date.now() - memoAt < TTL) return memo;
-  const listed = (await spotify.listPlaylists()).filter((p) => p.mine);
+  const listed = (await listing(refresh)).filter((p) => p.mine);
   const playlists = {}, unindexed = [];
   let stopped = null;
   for (const p of listed) {
     const file = join(plDir(), `${p.id}.json`);
     const cached = read(file);
     if (cached && cached.snapshot_id === p.snapshot_id) { playlists[p.id] = { ...cached, name: p.name, description: p.description }; continue; }
+    if (p.tracks === 0) { // the listing already says it's empty: no call needed
+      const entry = { id: p.id, name: p.name, description: p.description, snapshot_id: p.snapshot_id, tracks: [] };
+      write(file, entry); playlists[p.id] = entry; continue;
+    }
     if (!stopped) {
       try {
         const tracks = await spotify.playlistTracks(p.id, { reserve: RESERVE });
@@ -104,4 +121,4 @@ async function likedIndex(alreadyStopped) {
 }
 
 // Forget the in-memory memo (after writes made through the tools, so the next analysis re-lists).
-export function invalidate() { memo = null; }
+export function invalidate() { memo = null; relistNext = true; }
