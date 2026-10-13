@@ -49,7 +49,7 @@ The first test against your real account (546 owned playlists) tripped Spotify's
 - the first full index spreads over about two days and resumes by itself; until it's complete, the tools report `coverage`
 - reading a playlist now takes one call instead of two
 
-The test suite now has 18 tests. The live write test (create, add, rename, remove and delete a throwaway playlist) is still to do once the lockout lifts.
+**2026-10-13, after the lockout lifted:** the full index ran in one sitting, 703 calls at 1 second each: 617 of 617 owned playlists (10,654 tracks) and 2,335 liked songs, all in `cache/`, no ban. Then a write round trip through the MCP on a throwaway private playlist (create, add with duplicate skipped, rename, read back, remove, delete) passed. So the lockout was about pace, not count: the defaults are now 1 second between calls and a 600-call daily cap. The test suite has 19 tests. A launchd job (`~/Library/LaunchAgents/com.quinn.spotify-library-index.plist`) refreshes the index nightly at 01:05 and logs to `logs/index.log`.
 
 ## What Quinn does next
 1. Fix GitHub auth (`gh auth login`), then publish the fork: `cd ~/code/spotify-library-mcp && gh repo fork --remote --remote-name origin`. Oliver's repo is already set as `upstream`, and the local commits sit on top of it. (`gh` was logged out, so I couldn't fork it.)
@@ -61,5 +61,5 @@ The test suite now has 18 tests. The live write test (create, add, rename, remov
    claude mcp add --scope user spotify-library -- node /Users/quinn/code/spotify-library-mcp/src/server.js
    ```
 
-   After the lockout lifts, run `npm run index` once a day until it reports `"complete": true` (about two days). Then try `summarize_library` in Claude.
+   The index is complete and refreshes itself nightly. Try `summarize_library` in Claude; from the cache it costs ~16 calls for the listing and one per changed playlist.
 5. Later, for the phone: run `npm run start:http` under launchd on 127.0.0.1 and mount it on the OAuth gateway, following the WhatsApp MCP pattern in mac-mini-dev. Don't put `SPOTIFY_REFRESH_TOKEN` in the plist, because real environment variables override `.env` and would win over the rotated token.
