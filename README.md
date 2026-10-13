@@ -101,4 +101,4 @@ Reading every playlist of a ~550-playlist library in one go (≈500+ calls in un
 - the analysis tools read playlists from `cache/` (git-ignored), keyed by each playlist's `snapshot_id`, so only changed playlists cost calls. Indexing stops 50 calls short of the cap (`SPOTIFY_INDEX_RESERVE`) and resumes on the next call or day; results carry `coverage` until it's complete
 - `npm run index` builds or refreshes the cache outside a chat; `node bin/spot.js budget` shows today's counters
 
-A first full index of ~550 playlists takes about two days at the default cap. After that, a refresh of an unchanged library costs roughly one call per 50 playlists.
+Measured 2026-10-13: a full index of 617 playlists + 2,335 liked songs took 703 calls at 1 s pacing in one sitting, no ban. The day before, ~350 calls at 150 ms pacing (plus another session) got a 24h ban. Pacing is what matters; the default is now 1 s and the cap 600. A refresh of an unchanged library costs roughly one call per 50 playlists.

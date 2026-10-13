@@ -9,9 +9,9 @@ const API = process.env.SPOTIFY_API_URL ?? "https://api.spotify.com/v1";
 let accessToken = null;
 let expiresAt = 0;
 
-// Pacing: a burst of ~500 calls got this client silently dropped at TLS level for ~10 minutes (not a 429).
-// Keep a minimum gap between requests; 429s are still honoured via Retry-After below.
-const MIN_GAP_MS = Number(process.env.SPOTIFY_MIN_GAP_MS ?? 150);
+// Pacing. 150 ms gaps got a ~550-playlist walk a 24h app-wide 429 (2026-10-12); 1 s gaps let 703 calls through the next
+// day. Default to 1 s: slow is cheap, a lockout costs a day. 429s are still honoured via Retry-After below.
+const MIN_GAP_MS = Number(process.env.SPOTIFY_MIN_GAP_MS ?? 1000);
 let lastCall = 0;
 async function pace() {
   const wait = lastCall + MIN_GAP_MS - Date.now();

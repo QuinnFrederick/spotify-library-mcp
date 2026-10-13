@@ -7,3 +7,4 @@ node_modules/
 library.json
 .DS_Store
 app/Sorted/Sorted/spotify-export.json
+logs/

@@ -8,8 +8,9 @@ import { ROOT } from "./env.js";
 
 const FILE = process.env.SPOTIFY_BUDGET_FILE ?? join(ROOT, ".search-budget.json");
 export const DAILY_CAP = Number(process.env.SPOTIFY_SEARCH_DAILY_CAP ?? 800); // safety margin under ~1000
-// Deliberately low: ~350 calls plus another session's unknown share tripped a 24h ban on 2026-10-12. lastBan records what actually tripped it, so this can be tuned.
-export const DAILY_CALL_CAP = Number(process.env.SPOTIFY_DAILY_CALL_CAP ?? 250);
+// 2026-10-12: ~350 bursty calls (150 ms gap) plus another session's share tripped a 24h ban.
+// 2026-10-13: 703 calls at 1 s pacing went through cleanly. So pacing matters more than the count; 600 is under the proven figure. lastBan records what actually tripped it, so this can be tuned.
+export const DAILY_CALL_CAP = Number(process.env.SPOTIFY_DAILY_CALL_CAP ?? 600);
 const CACHE_MAX = 5000;
 
 const today = () => new Date().toISOString().slice(0, 10);
