@@ -12,7 +12,8 @@
     "test": "node --test test/*.test.js",
     "test:mock": "node test/mock-spotify.js",
     "start:http": "node src/http.js",
-    "index": "node bin/spot.js index"
+    "index": "node bin/spot.js index",
+    "cleanup:test-playlists": "node bin/spot.js delete-listed plan/test-playlists.json"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.0",
