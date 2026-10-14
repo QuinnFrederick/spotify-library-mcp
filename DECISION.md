@@ -51,6 +51,12 @@ The first test against your real account (546 owned playlists) tripped Spotify's
 
 **2026-10-13, after the lockout lifted:** the full index ran in one sitting, 703 calls at 1 second each: 617 of 617 owned playlists (10,654 tracks) and 2,335 liked songs, all in `cache/`, no ban. Then a write round trip through the MCP on a throwaway private playlist (create, add with duplicate skipped, rename, read back, remove, delete) passed. So the lockout was about pace, not count: the defaults are now 1 second between calls and a 600-call daily cap. The test suite has 19 tests. A launchd job (`~/Library/LaunchAgents/com.quinn.spotify-library-index.plist`) refreshes the index nightly at 01:05 and logs to `logs/index.log`.
 
+## Naming rules (Quinn's, standing)
+
+- Emoji only mark the kind of playlist: 💽 album, 📼 mixtape, 🌱 seedling, 🧺 collection.
+- Genre, subgenre and folder names are always plain text: `ELECTRO : BASS : 📼 Name`, a folder called `ELECTRO test`, never `🧪 ELECTRO test`.
+- The plan builder (`plan/_build/build.mjs`, local only) refuses to produce a name that breaks this.
+
 ## What Quinn does next
 1. Fix GitHub auth (`gh auth login`), then publish the fork: `cd ~/code/spotify-library-mcp && gh repo fork --remote --remote-name origin`. Oliver's repo is already set as `upstream`, and the local commits sit on top of it. (`gh` was logged out, so I couldn't fork it.)
 2. At developer.spotify.com, create (or reuse) your one app, add the redirect URI `http://127.0.0.1:8888/callback`, and put the Client ID in `.env`. Dev-mode apps need the owner to have Premium.
